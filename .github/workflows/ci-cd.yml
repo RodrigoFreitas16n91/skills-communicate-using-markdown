@@ -53,6 +53,8 @@ jobs:
   verificacao-qualidade:
     name: 🔍 Verificação de Qualidade
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: 📥 Checkout do código
         uses: actions/checkout@v4
@@ -89,6 +91,8 @@ jobs:
     name: 🧪 Testes Unitários
     runs-on: ubuntu-latest
     needs: verificacao-qualidade
+    permissions:
+      contents: read
     steps:
       - name: 📥 Checkout do código
         uses: actions/checkout@v4
@@ -130,6 +134,8 @@ jobs:
     name: 🔗 Testes de Integração
     runs-on: ubuntu-latest
     needs: testes-unitarios
+    permissions:
+      contents: read
 
     # Serviços auxiliares para os testes
     services:
@@ -211,6 +217,8 @@ jobs:
     name: 🔐 Scan de Segurança
     runs-on: ubuntu-latest
     needs: verificacao-qualidade
+    permissions:
+      contents: read
     steps:
       - name: 📥 Checkout do código
         uses: actions/checkout@v4
@@ -251,6 +259,9 @@ jobs:
     name: 🐳 Build e Scan da Imagem Docker
     runs-on: ubuntu-latest
     needs: [testes-unitarios, scan-seguranca]
+    permissions:
+      contents: read
+      packages: write   # necessário para push ao ghcr.io
     outputs:
       tag-imagem: ${{ steps.meta.outputs.tags }}
       digest-imagem: ${{ steps.build-push.outputs.digest }}
@@ -311,6 +322,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [testes-integracao, build-imagem-docker]
     if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    permissions:
+      contents: read
     environment:
       name: staging
       url: https://staging.empresa.com
@@ -381,6 +394,8 @@ jobs:
     if: |
       (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.ambiente_destino == 'producao')
+    permissions:
+      contents: write   # necessário para criar tags de release
     environment:
       name: producao
       url: https://api.empresa.com
