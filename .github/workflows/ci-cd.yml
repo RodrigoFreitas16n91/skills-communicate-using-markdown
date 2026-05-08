@@ -194,7 +194,12 @@ jobs:
       - name: 🗄️ Executa migrações do banco
         env:
           DATABASE_URL: postgresql://usuario_pg:senha_teste_ci@localhost:5432/integracao_teste_db
-        run: alembic upgrade head
+        run: |
+          if [ -f alembic.ini ] || [ -d alembic ]; then
+            alembic upgrade head
+          else
+            echo "Configuração do Alembic não encontrada; pulando execução de migrações."
+          fi
 
       - name: 🔗 Executa testes de integração
         env:
