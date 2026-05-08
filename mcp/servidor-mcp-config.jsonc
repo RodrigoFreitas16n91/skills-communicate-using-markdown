@@ -15,87 +15,87 @@
       "nome": "buscar_pedido_erp",
       "descricao": "Busca um pedido específico no ERP pelo número do pedido e sistema de origem.",
       "parametros": {
-        "tipo": "object",
-        "propriedades": {
+        "type": "object",
+        "properties": {
           "sistema_origem": {
-            "tipo": "string",
+            "type": "string",
             "enum": ["TOTVS", "SAP", "ORACLE"],
-            "descricao": "Sistema ERP de origem do pedido."
+            "description": "Sistema ERP de origem do pedido."
           },
           "numero_pedido": {
-            "tipo": "string",
-            "descricao": "Número identificador do pedido no ERP."
+            "type": "string",
+            "description": "Número identificador do pedido no ERP."
           },
           "incluir_itens": {
-            "tipo": "boolean",
-            "descricao": "Se verdadeiro, inclui a lista de itens do pedido.",
+            "type": "boolean",
+            "description": "Se verdadeiro, inclui a lista de itens do pedido.",
             "default": true
           }
         },
-        "obrigatorios": ["sistema_origem", "numero_pedido"]
+        "required": ["sistema_origem", "numero_pedido"]
       }
     },
     {
       "nome": "listar_pedidos_periodo",
       "descricao": "Lista pedidos de um ERP dentro de um período de datas.",
       "parametros": {
-        "tipo": "object",
-        "propriedades": {
+        "type": "object",
+        "properties": {
           "sistema_origem": {
-            "tipo": "string",
+            "type": "string",
             "enum": ["TOTVS", "SAP", "ORACLE"],
-            "descricao": "Sistema ERP de origem."
+            "description": "Sistema ERP de origem."
           },
           "data_inicio": {
-            "tipo": "string",
-            "formato": "date-time",
-            "descricao": "Data de início do período (ISO 8601)."
+            "type": "string",
+            "format": "date-time",
+            "description": "Data de início do período (ISO 8601)."
           },
           "data_fim": {
-            "tipo": "string",
-            "formato": "date-time",
-            "descricao": "Data de fim do período (ISO 8601). Padrão: agora."
+            "type": "string",
+            "format": "date-time",
+            "description": "Data de fim do período (ISO 8601). Padrão: agora."
           },
           "limite": {
-            "tipo": "integer",
-            "descricao": "Número máximo de pedidos a retornar.",
+            "type": "integer",
+            "description": "Número máximo de pedidos a retornar.",
             "default": 100,
             "minimum": 1,
             "maximum": 1000
           }
         },
-        "obrigatorios": ["sistema_origem", "data_inicio"]
+        "required": ["sistema_origem", "data_inicio"]
       }
     },
     {
       "nome": "salvar_pedido_banco",
       "descricao": "Persiste ou atualiza um pedido normalizado no banco de dados local.",
       "parametros": {
-        "tipo": "object",
-        "propriedades": {
+        "type": "object",
+        "properties": {
           "numero_pedido": {
-            "tipo": "string",
-            "descricao": "Número do pedido."
+            "type": "string",
+            "description": "Número do pedido."
           },
           "codigo_cliente": {
-            "tipo": "string",
-            "descricao": "Código do cliente."
+            "type": "string",
+            "description": "Código do cliente."
           },
           "valor_total": {
-            "tipo": "number",
-            "descricao": "Valor total do pedido."
+            "type": "number",
+            "description": "Valor total do pedido."
           },
           "sistema_origem": {
-            "tipo": "string",
+            "type": "string",
             "enum": ["TOTVS", "SAP", "ORACLE"],
-            "descricao": "Sistema ERP de origem."
+            "description": "Sistema ERP de origem."
           },
           "status_pedido": {
-            "tipo": "string",
-            "descricao": "Status atual do pedido."
+            "type": "string",
+            "description": "Status atual do pedido."
           }
         },
-        "obrigatorios": ["numero_pedido", "codigo_cliente", "sistema_origem"]
+        "required": ["numero_pedido", "codigo_cliente", "sistema_origem"]
       }
     },
     {
