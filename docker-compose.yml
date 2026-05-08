@@ -1,0 +1,337 @@
+version: "3.9"
+
+# ============================================================
+# docker-compose.yml — Plataforma de Integração ERP/CRM
+# Descrição: Orquestra todos os serviços da plataforma
+#            via Docker Compose para ambiente de desenvolvimento
+#            e homologação.
+# Autor: Rodrigo Freitas
+# ============================================================
+
+# Rede interna compartilhada entre todos os serviços
+networks:
+  rede-integracao:
+    driver: bridge
+
+# Volumes persistentes para dados
+volumes:
+  dados-postgres:
+  dados-redis:
+  dados-rabbitmq:
+  dados-elasticsearch:
+  dados-grafana:
+
+# Configuração padrão de saúde para reutilização
+x-configuracao-saude: &configuracao-saude-padrao
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+services:
+
+  # ============================================================
+  # SERVIÇO: mcp-servidor
+  # Descrição: Servidor MCP principal — orquestra chamadas
+  #            entre os agentes e os sistemas externos ERP/CRM.
+  # Porta: 8000 (API REST) | 8001 (MCP WebSocket)
+  # ============================================================
+  mcp-servidor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: producao
+    container_name: mcp-servidor
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # API REST principal
+      - "8001:8001"   # Endpoint MCP WebSocket
+    environment:
+      - AMBIENTE=${AMBIENTE:-desenvolvimento}
+      - LOG_NIVEL=${LOG_NIVEL:-DEBUG}
+      - DATABASE_URL=postgresql://usuario_pg:${POSTGRES_SENHA:-senha_dev}@postgres:5432/integracao_db
+      - REDIS_URL=redis://:${REDIS_SENHA:-senha_dev}@redis:6379/0
+      - RABBITMQ_URL=amqp://usuario_rmq:${RABBITMQ_SENHA:-senha_dev}@rabbitmq:5672/
+      - MCP_TOKEN_ACESSO=${MCP_TOKEN_ACESSO:-token_dev_inseguro}
+      - TOTVS_URL_BASE=${TOTVS_URL_BASE}
+      - SAP_URL_BASE=${SAP_URL_BASE}
+      - ORACLE_URL_BASE=${ORACLE_URL_BASE}
+    volumes:
+      - ./mcp:/app/mcp:ro         # Configurações MCP (somente leitura)
+      - ./logs:/app/logs          # Logs da aplicação
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/saude"]
+      <<: *configuracao-saude-padrao
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  # ============================================================
+  # SERVIÇO: agentes-servico
+  # Descrição: Executa os agentes inteligentes de integração
+  #            (sincronização, validação, transformação, alertas).
+  # Porta: 8002 (API de status dos agentes)
+  # ============================================================
+  agentes-servico:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: producao
+    container_name: agentes-servico
+    restart: unless-stopped
+    command: python -m agentes.executor
+    ports:
+      - "8002:8002"
+    environment:
+      - AMBIENTE=${AMBIENTE:-desenvolvimento}
+      - LOG_NIVEL=${LOG_NIVEL:-DEBUG}
+      - DATABASE_URL=postgresql://usuario_pg:${POSTGRES_SENHA:-senha_dev}@postgres:5432/integracao_db
+      - REDIS_URL=redis://:${REDIS_SENHA:-senha_dev}@redis:6379/0
+      - RABBITMQ_URL=amqp://usuario_rmq:${RABBITMQ_SENHA:-senha_dev}@rabbitmq:5672/
+      - MCP_SERVIDOR_URL=http://mcp-servidor:8000
+      - MCP_TOKEN_ACESSO=${MCP_TOKEN_ACESSO:-token_dev_inseguro}
+      - LLM_PROVEDOR=${LLM_PROVEDOR:-openai}
+      - LLM_MODELO=${LLM_MODELO:-gpt-4o-mini}
+      - LLM_CHAVE_API=${LLM_CHAVE_API}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    depends_on:
+      mcp-servidor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/saude"]
+      <<: *configuracao-saude-padrao
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ============================================================
+  # SERVIÇO: worker-filas
+  # Descrição: Consumidor de filas RabbitMQ. Processa mensagens
+  #            de integração em background de forma assíncrona.
+  # ============================================================
+  worker-filas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: producao
+    container_name: worker-filas
+    restart: unless-stopped
+    command: python -m conectores.worker
+    environment:
+      - AMBIENTE=${AMBIENTE:-desenvolvimento}
+      - LOG_NIVEL=${LOG_NIVEL:-DEBUG}
+      - DATABASE_URL=postgresql://usuario_pg:${POSTGRES_SENHA:-senha_dev}@postgres:5432/integracao_db
+      - REDIS_URL=redis://:${REDIS_SENHA:-senha_dev}@redis:6379/0
+      - RABBITMQ_URL=amqp://usuario_rmq:${RABBITMQ_SENHA:-senha_dev}@rabbitmq:5672/
+      - QUANTIDADE_WORKERS=${QUANTIDADE_WORKERS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ============================================================
+  # SERVIÇO: postgres
+  # Descrição: Banco de dados relacional principal.
+  #            Armazena todos os dados normalizados das integrações.
+  # Porta: 5432
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=integracao_db
+      - POSTGRES_USER=usuario_pg
+      - POSTGRES_PASSWORD=${POSTGRES_SENHA:-senha_dev}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - dados-postgres:/var/lib/postgresql/data
+      - ./scripts/banco/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U usuario_pg -d integracao_db"]
+      <<: *configuracao-saude-padrao
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ============================================================
+  # SERVIÇO: redis
+  # Descrição: Cache em memória para tokens OAuth, resultados
+  #            de consultas frequentes e sessões de agentes.
+  # Porta: 6379
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_SENHA:-senha_dev} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - dados-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_SENHA:-senha_dev}", "ping"]
+      <<: *configuracao-saude-padrao
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ============================================================
+  # SERVIÇO: rabbitmq
+  # Descrição: Broker de mensagens para comunicação assíncrona
+  #            entre os serviços e agentes da plataforma.
+  # Porta: 5672 (AMQP) | 15672 (painel web de gerenciamento)
+  # ============================================================
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"    # Protocolo AMQP
+      - "15672:15672"  # Painel de gerenciamento web
+    environment:
+      - RABBITMQ_DEFAULT_USER=usuario_rmq
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_SENHA:-senha_dev}
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - dados-rabbitmq:/var/lib/rabbitmq
+      - ./mcp/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      <<: *configuracao-saude-padrao
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ============================================================
+  # SERVIÇO: elasticsearch
+  # Descrição: Motor de busca e análise de logs da plataforma.
+  #            Armazena todos os logs estruturados dos serviços.
+  # Porta: 9200 (REST) | 9300 (cluster)
+  # ============================================================
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false  # Desabilitar em dev (habilitar em prod!)
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTIC_PASSWORD=${ELASTIC_SENHA:-senha_dev}
+    volumes:
+      - dados-elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # ============================================================
+  # SERVIÇO: kibana
+  # Descrição: Painel de visualização de logs e monitoramento.
+  #            Interface gráfica para o Elasticsearch.
+  # Porta: 5601
+  # ============================================================
+  kibana:
+    image: kibana:8.13.0
+    container_name: kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SENHA:-senha_dev}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - rede-integracao
+
+  # ============================================================
+  # SERVIÇO: grafana
+  # Descrição: Painel de métricas de performance e alertas.
+  #            Visualiza dados do Prometheus e PostgreSQL.
+  # Porta: 3000
+  # ============================================================
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_SENHA:-senha_dev}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - dados-grafana:/var/lib/grafana
+      - ./mcp/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./mcp/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - rede-integracao
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M

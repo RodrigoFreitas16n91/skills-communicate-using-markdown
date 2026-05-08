@@ -1,0 +1,452 @@
+# ============================================================
+# Workflow: CI/CD — Integração e Entrega Contínua
+# Descrição: Pipeline automatizado de testes, qualidade,
+#            segurança e deploy da plataforma de integrações.
+# Autor: Rodrigo Freitas
+# ============================================================
+
+name: 🚀 CI/CD — Plataforma de Integrações ERP/CRM
+
+on:
+  # Dispara em pushes para branches de feature e branches principais
+  push:
+    branches:
+      - "feature/**"
+      - "fix/**"
+      - "hotfix/**"
+      - staging
+      - main
+  # Dispara em Pull Requests para staging e main
+  pull_request:
+    branches:
+      - staging
+      - main
+  # Permite disparo manual para deploy em produção
+  workflow_dispatch:
+    inputs:
+      ambiente_destino:
+        description: "Ambiente de destino do deploy"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - producao
+
+# Cancela execuções anteriores em andamento para a mesma branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Variáveis de ambiente globais do workflow
+env:
+  REGISTRY_IMAGEM: ghcr.io/${{ github.repository_owner }}/plataforma-integracao
+  VERSAO_PYTHON: "3.12"
+
+jobs:
+
+  # ============================================================
+  # JOB: verificacao-qualidade
+  # Descrição: Lint, formatação e análise estática do código.
+  #            Verifica se o código segue os padrões do projeto.
+  # ============================================================
+  verificacao-qualidade:
+    name: 🔍 Verificação de Qualidade
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configura Python ${{ env.VERSAO_PYTHON }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.VERSAO_PYTHON }}
+          cache: pip
+
+      - name: 📦 Instala dependências de desenvolvimento
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: 🎨 Verifica formatação com Black
+        run: black --check --diff .
+
+      - name: 📏 Verifica estilo com Flake8
+        run: flake8 . --count --statistics --max-line-length=120
+
+      - name: 🔎 Análise estática com Pylint
+        run: pylint agentes/ conectores/ mcp/ --fail-under=8.0
+
+      - name: 🏷️ Verificação de tipos com Mypy
+        run: mypy agentes/ conectores/ mcp/ --ignore-missing-imports
+
+  # ============================================================
+  # JOB: testes-unitarios
+  # Descrição: Executa a suíte de testes unitários e mede
+  #            a cobertura de código (mínimo 80% exigido).
+  # ============================================================
+  testes-unitarios:
+    name: 🧪 Testes Unitários
+    runs-on: ubuntu-latest
+    needs: verificacao-qualidade
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configura Python ${{ env.VERSAO_PYTHON }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.VERSAO_PYTHON }}
+          cache: pip
+
+      - name: 📦 Instala dependências
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: 🧪 Executa testes unitários com cobertura
+        run: |
+          pytest testes/unitarios/ \
+            --cov=agentes \
+            --cov=conectores \
+            --cov=mcp \
+            --cov-report=xml:cobertura.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -v
+
+      - name: 📊 Publica relatório de cobertura
+        uses: codecov/codecov-action@v4
+        with:
+          file: cobertura.xml
+          fail_ci_if_error: false
+
+  # ============================================================
+  # JOB: testes-integracao
+  # Descrição: Testes de integração usando serviços reais
+  #            (PostgreSQL, Redis, RabbitMQ) via Docker.
+  # ============================================================
+  testes-integracao:
+    name: 🔗 Testes de Integração
+    runs-on: ubuntu-latest
+    needs: testes-unitarios
+
+    # Serviços auxiliares para os testes
+    services:
+      postgres-teste:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: integracao_teste_db
+          POSTGRES_USER: usuario_pg
+          POSTGRES_PASSWORD: senha_teste_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis-teste:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      rabbitmq-teste:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: usuario_rmq
+          RABBITMQ_DEFAULT_PASS: senha_teste_ci
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics check_port_connectivity"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configura Python ${{ env.VERSAO_PYTHON }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.VERSAO_PYTHON }}
+          cache: pip
+
+      - name: 📦 Instala dependências
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: 🗄️ Executa migrações do banco
+        env:
+          DATABASE_URL: postgresql://usuario_pg:senha_teste_ci@localhost:5432/integracao_teste_db
+        run: alembic upgrade head
+
+      - name: 🔗 Executa testes de integração
+        env:
+          DATABASE_URL: postgresql://usuario_pg:senha_teste_ci@localhost:5432/integracao_teste_db
+          REDIS_URL: redis://localhost:6379/0
+          RABBITMQ_URL: amqp://usuario_rmq:senha_teste_ci@localhost:5672/
+          AMBIENTE: teste
+        run: |
+          pytest testes/integracao/ \
+            -m integracao \
+            -v \
+            --tb=short
+
+  # ============================================================
+  # JOB: scan-seguranca
+  # Descrição: Análise de vulnerabilidades no código Python
+  #            (Bandit) e nas dependências (Safety).
+  # ============================================================
+  scan-seguranca:
+    name: 🔐 Scan de Segurança
+    runs-on: ubuntu-latest
+    needs: verificacao-qualidade
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configura Python ${{ env.VERSAO_PYTHON }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.VERSAO_PYTHON }}
+          cache: pip
+
+      - name: 📦 Instala ferramentas de segurança
+        run: pip install bandit[toml] safety
+
+      - name: 🔍 Scan de código com Bandit
+        run: |
+          bandit -r agentes/ conectores/ mcp/ \
+            -ll \
+            -f json \
+            -o relatorio-bandit.json \
+            || (cat relatorio-bandit.json && exit 1)
+
+      - name: 🛡️ Verifica CVEs nas dependências com Safety
+        run: safety check --full-report -r requirements.txt
+
+      - name: 📄 Publica relatório de segurança
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-seguranca
+          path: relatorio-bandit.json
+
+  # ============================================================
+  # JOB: build-imagem-docker
+  # Descrição: Constrói e publica a imagem Docker da plataforma.
+  #            Realiza scan de vulnerabilidades na imagem (Trivy).
+  # ============================================================
+  build-imagem-docker:
+    name: 🐳 Build e Scan da Imagem Docker
+    runs-on: ubuntu-latest
+    needs: [testes-unitarios, scan-seguranca]
+    outputs:
+      tag-imagem: ${{ steps.meta.outputs.tags }}
+      digest-imagem: ${{ steps.build-push.outputs.digest }}
+
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🔑 Login no Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Gera metadados da imagem (tags e labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGEM }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-,format=short
+
+      - name: 🏗️ Configura Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🐳 Build e Push da imagem Docker
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: producao
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 🔭 Scan de vulnerabilidades com Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY_IMAGEM }}:sha-${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+
+  # ============================================================
+  # JOB: deploy-staging
+  # Descrição: Deploy automático no ambiente de homologação
+  #            após build bem-sucedido em push para staging.
+  # ============================================================
+  deploy-staging:
+    name: 🧪 Deploy em Staging
+    runs-on: ubuntu-latest
+    needs: [testes-integracao, build-imagem-docker]
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: https://staging.empresa.com
+
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🚀 Deploy em Staging via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USUARIO_SSH }}
+          key: ${{ secrets.STAGING_CHAVE_SSH }}
+          script: |
+            # Acessa diretório da aplicação
+            cd /opt/integracao-erp
+
+            # Atualiza imagem
+            export REGISTRY_IMAGEM=${{ env.REGISTRY_IMAGEM }}
+            export TAG_IMAGEM=sha-${{ github.sha }}
+
+            # Pull da nova imagem
+            docker-compose pull mcp-servidor agentes-servico worker-filas
+
+            # Deploy sem downtime
+            docker-compose up -d --no-deps mcp-servidor agentes-servico worker-filas
+
+            # Aguarda serviços ficarem saudáveis
+            sleep 30
+
+            # Verifica saúde dos serviços
+            docker-compose ps | grep -q "Up" || exit 1
+
+            echo "✅ Deploy em Staging concluído com sucesso!"
+
+      - name: 🏥 Verifica saúde após deploy em Staging
+        run: |
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://staging.empresa.com/saude)
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Health check falhou! Status: $STATUS"
+            exit 1
+          fi
+          echo "✅ Staging saudável! Status: $STATUS"
+
+      - name: 💬 Notifica Slack — Staging OK
+        if: success()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "✅ *Deploy em Staging concluído!*\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Autor:* ${{ github.actor }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ============================================================
+  # JOB: deploy-producao
+  # Descrição: Deploy em produção com aprovação manual obrigatória.
+  #            Usa estratégia Blue/Green para zero downtime.
+  #            Apenas para push em main ou workflow_dispatch.
+  # ============================================================
+  deploy-producao:
+    name: 🚀 Deploy em Produção
+    runs-on: ubuntu-latest
+    needs: [testes-integracao, build-imagem-docker]
+    if: |
+      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.ambiente_destino == 'producao')
+    environment:
+      name: producao
+      url: https://api.empresa.com
+
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🏷️ Cria tag de release semântica
+        id: tag-release
+        run: |
+          # Extrai versão do pyproject.toml
+          VERSAO=$(grep -m1 'version' pyproject.toml | cut -d'"' -f2)
+          echo "versao=$VERSAO" >> $GITHUB_OUTPUT
+          git tag "v$VERSAO" || echo "Tag já existe"
+          git push origin "v$VERSAO" || echo "Tag já publicada"
+
+      - name: 🚀 Deploy em Produção via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCAO_HOST }}
+          username: ${{ secrets.PRODUCAO_USUARIO_SSH }}
+          key: ${{ secrets.PRODUCAO_CHAVE_SSH }}
+          script: |
+            cd /opt/integracao-erp
+
+            # Sobe ambiente GREEN com nova versão
+            export TAG_NOVA=${{ env.REGISTRY_IMAGEM }}:sha-${{ github.sha }}
+            docker-compose -f docker-compose.prod.yml -p green pull
+            docker-compose -f docker-compose.prod.yml -p green up -d
+
+            # Aguarda GREEN ficar saudável
+            sleep 30
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8010/saude)
+
+            if [ "$STATUS" == "200" ]; then
+              echo "✅ GREEN saudável. Fazendo switch de tráfego..."
+              # Atualiza proxy para apontar para GREEN
+              nginx -s reload
+              # Remove ambiente BLUE antigo
+              docker-compose -f docker-compose.prod.yml -p blue down
+              echo "✅ Deploy em Produção v${{ steps.tag-release.outputs.versao }} concluído!"
+            else
+              echo "❌ GREEN não está saudável. Mantendo BLUE. Fazendo rollback..."
+              docker-compose -f docker-compose.prod.yml -p green down
+              exit 1
+            fi
+
+      - name: 💬 Notifica Slack — Produção OK
+        if: success()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "🚀 *Deploy em Produção concluído!*\n*Versão:* v${{ steps.tag-release.outputs.versao }}\n*Commit:* ${{ github.sha }}\n*Responsável:* ${{ github.actor }}\n*Ambiente:* https://api.empresa.com"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: 💬 Notifica Slack — Produção FALHOU
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "❌ *FALHA no Deploy em Produção!*\n*Commit:* ${{ github.sha }}\n*Responsável:* ${{ github.actor }}\n*Ação:* Rollback automático executado\n*Ver logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

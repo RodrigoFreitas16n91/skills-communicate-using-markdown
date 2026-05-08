@@ -1,0 +1,223 @@
+# Arquivo de configuração do servidor MCP (Model Context Protocol)
+# Descrição: Define as ferramentas expostas pelo servidor MCP para
+#            uso pelos agentes inteligentes da plataforma.
+# Formato: JSON Schema compatível com MCP Specification 1.0
+# Autor: Rodrigo Freitas
+
+{
+  "nome_servidor": "plataforma-integracao-mcp",
+  "versao": "1.0.0",
+  "descricao": "Servidor MCP da Plataforma de Integrações ERP/CRM",
+  "protocolo": "2024-11-05",
+
+  "ferramentas": [
+    {
+      "nome": "buscar_pedido_erp",
+      "descricao": "Busca um pedido específico no ERP pelo número do pedido e sistema de origem.",
+      "parametros": {
+        "tipo": "object",
+        "propriedades": {
+          "sistema_origem": {
+            "tipo": "string",
+            "enum": ["TOTVS", "SAP", "ORACLE"],
+            "descricao": "Sistema ERP de origem do pedido."
+          },
+          "numero_pedido": {
+            "tipo": "string",
+            "descricao": "Número identificador do pedido no ERP."
+          },
+          "incluir_itens": {
+            "tipo": "boolean",
+            "descricao": "Se verdadeiro, inclui a lista de itens do pedido.",
+            "default": true
+          }
+        },
+        "obrigatorios": ["sistema_origem", "numero_pedido"]
+      }
+    },
+    {
+      "nome": "listar_pedidos_periodo",
+      "descricao": "Lista pedidos de um ERP dentro de um período de datas.",
+      "parametros": {
+        "tipo": "object",
+        "propriedades": {
+          "sistema_origem": {
+            "tipo": "string",
+            "enum": ["TOTVS", "SAP", "ORACLE"],
+            "descricao": "Sistema ERP de origem."
+          },
+          "data_inicio": {
+            "tipo": "string",
+            "formato": "date-time",
+            "descricao": "Data de início do período (ISO 8601)."
+          },
+          "data_fim": {
+            "tipo": "string",
+            "formato": "date-time",
+            "descricao": "Data de fim do período (ISO 8601). Padrão: agora."
+          },
+          "limite": {
+            "tipo": "integer",
+            "descricao": "Número máximo de pedidos a retornar.",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "obrigatorios": ["sistema_origem", "data_inicio"]
+      }
+    },
+    {
+      "nome": "salvar_pedido_banco",
+      "descricao": "Persiste ou atualiza um pedido normalizado no banco de dados local.",
+      "parametros": {
+        "tipo": "object",
+        "propriedades": {
+          "numero_pedido": {
+            "tipo": "string",
+            "descricao": "Número do pedido."
+          },
+          "codigo_cliente": {
+            "tipo": "string",
+            "descricao": "Código do cliente."
+          },
+          "valor_total": {
+            "tipo": "number",
+            "descricao": "Valor total do pedido."
+          },
+          "sistema_origem": {
+            "tipo": "string",
+            "enum": ["TOTVS", "SAP", "ORACLE"],
+            "descricao": "Sistema ERP de origem."
+          },
+          "status_pedido": {
+            "tipo": "string",
+            "descricao": "Status atual do pedido."
+          }
+        },
+        "obrigatorios": ["numero_pedido", "codigo_cliente", "sistema_origem"]
+      }
+    },
+    {
+      "nome": "consultar_pedido_banco",
+      "descricao": "Consulta um pedido no banco de dados local pelo número.",
+      "parametros": {
+        "tipo": "object",
+        "propriedades": {
+          "numero_pedido": {
+            "tipo": "string",
+            "descricao": "Número do pedido a consultar."
+          },
+          "sistema_origem": {
+            "tipo": "string",
+            "enum": ["TOTVS", "SAP", "ORACLE"],
+            "descricao": "Sistema de origem para filtrar (opcional)."
+          }
+        },
+        "obrigatorios": ["numero_pedido"]
+      }
+    },
+    {
+      "nome": "enviar_mensagem_slack",
+      "descricao": "Envia uma notificação para um canal do Slack.",
+      "parametros": {
+        "tipo": "object",
+        "propriedades": {
+          "canal": {
+            "tipo": "string",
+            "descricao": "Nome do canal Slack (ex: #alertas-integracao)."
+          },
+          "mensagem": {
+            "tipo": "string",
+            "descricao": "Texto da mensagem a enviar."
+          },
+          "urgente": {
+            "tipo": "boolean",
+            "descricao": "Se verdadeiro, menciona @here na mensagem.",
+            "default": false
+          }
+        },
+        "obrigatorios": ["canal", "mensagem"]
+      }
+    },
+    {
+      "nome": "criar_card_trello",
+      "descricao": "Cria um novo card em um quadro do Trello para rastreamento.",
+      "parametros": {
+        "tipo": "object",
+        "propriedades": {
+          "quadro": {
+            "tipo": "string",
+            "descricao": "Nome do quadro Trello de destino."
+          },
+          "lista": {
+            "tipo": "string",
+            "descricao": "Nome da lista dentro do quadro (ex: BACKLOG)."
+          },
+          "titulo": {
+            "tipo": "string",
+            "descricao": "Título do card."
+          },
+          "descricao": {
+            "tipo": "string",
+            "descricao": "Descrição detalhada do card."
+          },
+          "etiquetas": {
+            "tipo": "array",
+            "items": {"tipo": "string"},
+            "descricao": "Lista de etiquetas para o card."
+          }
+        },
+        "obrigatorios": ["quadro", "lista", "titulo"]
+      }
+    },
+    {
+      "nome": "registrar_log_evento",
+      "descricao": "Registra um evento de integração no sistema de logs (Elasticsearch).",
+      "parametros": {
+        "tipo": "object",
+        "propriedades": {
+          "nivel": {
+            "tipo": "string",
+            "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            "descricao": "Nível de severidade do log."
+          },
+          "mensagem": {
+            "tipo": "string",
+            "descricao": "Mensagem descritiva do evento."
+          },
+          "sistema_origem": {
+            "tipo": "string",
+            "descricao": "Sistema que gerou o evento."
+          },
+          "dados_extras": {
+            "tipo": "object",
+            "descricao": "Dados adicionais para contexto do log (opcional)."
+          }
+        },
+        "obrigatorios": ["nivel", "mensagem"]
+      }
+    }
+  ],
+
+  "recursos": [
+    {
+      "uri": "integracao://pedidos/recentes",
+      "nome": "Pedidos Recentes",
+      "descricao": "Lista os 50 pedidos mais recentes de todos os sistemas.",
+      "tipo_mime": "application/json"
+    },
+    {
+      "uri": "integracao://metricas/status",
+      "nome": "Status das Integrações",
+      "descricao": "Métricas de saúde de todas as integrações ativas.",
+      "tipo_mime": "application/json"
+    },
+    {
+      "uri": "integracao://logs/erros",
+      "nome": "Log de Erros Recentes",
+      "descricao": "Últimos 100 erros registrados nas integrações.",
+      "tipo_mime": "application/json"
+    }
+  ]
+}
