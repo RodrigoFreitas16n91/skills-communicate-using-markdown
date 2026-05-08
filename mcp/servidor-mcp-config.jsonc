@@ -1,8 +1,8 @@
-# Arquivo de configuração do servidor MCP (Model Context Protocol)
-# Descrição: Define as ferramentas expostas pelo servidor MCP para
-#            uso pelos agentes inteligentes da plataforma.
-# Formato: JSON Schema compatível com MCP Specification 1.0
-# Autor: Rodrigo Freitas
+// Arquivo de configuração do servidor MCP (Model Context Protocol)
+// Descrição: Define as ferramentas expostas pelo servidor MCP para
+//            uso pelos agentes inteligentes da plataforma.
+// Formato: JSON Schema compatível com MCP Specification 1.0
+// Autor: Rodrigo Freitas
 
 {
   "nome_servidor": "plataforma-integracao-mcp",
