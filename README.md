@@ -103,7 +103,7 @@ docker-compose ps
 │   ├── METODOLOGIA_AGIL.md    # Metodologia ágil
 │   └── CICD_DEVOPS.md         # CI/CD e DevOps
 ├── mcp/                        # Configurações do servidor MCP
-│   └── servidor-mcp-config.json
+│   └── servidor-mcp-config.jsonc
 ├── .github/
 │   └── workflows/
 │       └── ci-cd.yml          # Pipeline GitHub Actions
